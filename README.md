@@ -2,7 +2,7 @@
 
 Discord Lens 是一個本機優先的 Discord Data Package 分析工具。選擇 Discord 官方匯出的 `package` 資料夾後，應用程式會直接在瀏覽器中解析訊息與活動資料，整理成可互動的統計儀表板，並可匯出 Excel、HTML 或社群分享圖片。
 
-> 資料預設只在目前瀏覽器分頁與本機記憶體中處理，不會上傳到專案伺服器。重新整理頁面後，已匯入的資料會清除。
+> 訊息與 Activity 內容只在目前瀏覽器分頁及本機記憶體中處理，不會上傳到專案伺服器。若設定選用的 Bot Token，本機伺服器只會把 DM 對象的 User ID 傳給 Discord 官方 API，以取得公開帳號名稱與頭像。重新整理頁面後，已匯入的資料會清除。
 
 ## 功能
 
@@ -15,6 +15,7 @@ Discord Lens 是一個本機優先的 Discord Data Package 分析工具。選擇
 - 顯示語音連線時間、實際發言時間、通話場次與常用語音頻道
 - 點擊私訊排行即可查看該對象的本機訊息紀錄
 - 從私訊 `channel.json` 顯示對方 Discord User ID
+- 可用伺服器端 Bot Token 自動取得前 20 名私訊對象的 Discord 頭像
 - 可選擇顯示或隱藏 `Unknown Participant`
 - 匯出 Excel、獨立 HTML 報告或 PNG 分享圖片
 - PNG 提供限時動態、方形分享與橫式報告三種比例
@@ -29,7 +30,7 @@ Discord 官方 Data Package 的 `Messages` 資料只包含帳號本人送出的�
 
 ### 對方頭像
 
-官方資料包通常會提供帳號本人的 `Account/avatar.png`，但一對一私訊不會提供對方的頭像檔案或 avatar hash。因此 Discord Lens 對私訊對象使用本機產生的首字頭像，不會把 User ID 傳送到第三方查詢服務。
+官方資料包通常會提供帳號本人的 `Account/avatar.png`，但一對一私訊不會提供對方的頭像檔案或 avatar hash。未設定 Bot Token 時，Discord Lens 會使用本機產生的首字頭像；設定後，本機 API 會依 `channel.json` 裡的 User ID 向 Discord 官方 API 查詢公開頭像。Token 只存在伺服器端，瀏覽器不會收到 Token。
 
 請勿在專案中使用 Discord 使用者 Token。以一般使用者 Token 自動存取 Discord 屬於 self-bot 行為，可能違反 Discord 規範並導致帳號遭停權。
 
@@ -93,6 +94,18 @@ cd discord-user-data
 npm install
 npm run dev
 ```
+
+若要顯示私訊對象的真實頭像，複製範例環境檔並填入 Discord Bot Token：
+
+```bash
+copy .env.example .env
+```
+
+```dotenv
+DISCORD_BOT_TOKEN=你的_Bot_Token
+```
+
+這是選用功能；不設定仍可使用所有基本統計、聊天紀錄與匯出功能。修改 `.env` 後需要重新啟動開發伺服器。
 
 啟動後開啟終端顯示的本機網址，通常是：
 
@@ -164,10 +177,13 @@ PNG 使用瀏覽器 Canvas 在本機產生，提供：
 
 ## 隱私與安全
 
-- 不需要 Discord Token、Bot 或帳號密碼
+- 基本分析不需要 Discord Token、Bot 或帳號密碼
+- 真實對方頭像為選用功能，只接受 Bot Token；請勿使用 Discord User Token
 - 不應把 Discord User Token、Bot Token 或其他密鑰提交到 Repository
-- `.gitignore` 已排除 `.env*`
+- `.gitignore` 已排除 `.env*`，只保留不含密鑰的 `.env.example`
 - 不會儲存或上傳訊息原文
+- 啟用頭像功能時，只把最多前 20 名 DM 對象的 User ID 傳給 Discord 官方 API
+- Bot Token 只由 `app/api/discord-users/route.ts` 在本機伺服器端讀取，不會傳給前端
 - 聊天內容只在使用者點擊對象時，從對應的本機檔案讀取
 - 匯出檔只包含使用者主動勾選的內容
 - 分享報告前仍應檢查名稱、User ID、訊息統計等資訊是否適合公開
@@ -186,6 +202,7 @@ PNG 使用瀏覽器 Canvas 在本機產生，提供：
 
 ```text
 app/page.tsx       # 資料解析、統計、互動與匯出
+app/api/discord-users/route.ts # 使用 Bot Token 查詢公開帳號資料與頭像
 app/globals.css    # Discord 風格與響應式版面
 components/ui/     # 介面元件
 ```
@@ -210,9 +227,15 @@ Activity JSON 可能達到數 GB。請保持頁面開啟，並等待進度完成
 
 ### 看不到對方頭像
 
-一對一 DM 資料通常沒有對方頭像或 avatar hash。為維持零上傳與免 Token，工具不會呼叫第三方查詢服務。
+確認專案根目錄的 `.env` 已設定有效的 `DISCORD_BOT_TOKEN`，並在修改後重新啟動 `npm run dev`。接著重新選擇 Data Package；有 User ID 的前 20 名私訊對象會自動向 Discord 官方 API 查詢頭像。
+
+若仍只顯示首字頭像，請確認：
+
+- `.env` 與 `package.json` 位於同一層目錄
+- 使用的是 Discord Developer Portal 建立的 Bot Token，而不是 User Token
+- 本機可以連線至 `discord.com` 與 `cdn.discordapp.com`
+- 該排行項目能從 `Messages/.../channel.json` 解析出對方 User ID
 
 ## 授權
 
 目前 Repository 尚未附加開源授權。除非之後加入明確的 `LICENSE`，否則預設保留所有權利。
-

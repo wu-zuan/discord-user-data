@@ -24,6 +24,7 @@ type Channel = {
 };
 type ChatMessage = { at: number; content: string; attachments: number };
 type ConversationState = { name: string; recipientId?: string; messages: ChatMessage[]; loading: boolean; error?: string };
+type ParticipantProfile = { id: string; username: string; displayName: string; avatarUrl: string | null; avatar?: ImageBitmap };
 type VoiceSession = { at: number; connectedMs: number; speakingMs: number; channelId: string; guildId: string };
 type ImportedData = {
   userId: string;
@@ -199,6 +200,12 @@ function StatCard({ icon, label, value, note }: { icon: React.ReactNode; label: 
   return <article className="stat-card"><div className="stat-icon">{icon}</div><p>{label}</p><strong>{value}</strong><span>{note}</span></article>;
 }
 
+function AvatarImage({ src, alt }: { src: string; alt: string }) {
+  // The API already returns a small, private data URL; image optimization cannot improve it.
+  // oxlint-disable-next-line next/no-img-element
+  return <img src={src} alt={alt} />;
+}
+
 function DiscordMark({ size = 21 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true"><path fill="currentColor" d="M17 21c8-6 22-6 30 0 6 10 8 20 6 29-5 4-10 7-15 9l-4-6c-1 0-3 1-4 0l-4 6c-5-2-10-5-15-9-2-9 0-19 6-29Z"/><circle cx="24" cy="37" r="4" fill="#5865f2"/><circle cx="40" cy="37" r="4" fill="#5865f2"/><path d="M21 19l-3-7M43 19l3-7" stroke="currentColor" strokeWidth="5" strokeLinecap="round"/></svg>;
 }
@@ -217,17 +224,18 @@ function EmptyState({ onChoose }: { onChoose: () => void }) {
         <div className="folder-illustration"><FolderOpen size={38} /></div><h2>選擇你的 package 資料夾</h2>
         <p>需要包含 <code>Messages/index.json</code> 與各頻道的 <code>messages.json</code></p>
         <button className="primary-button" onClick={onChoose}><FolderOpen size={18} /> 選擇資料夾</button>
-        <div className="requirements"><div><Check size={16} /><span><b>不需要</b> Discord Token 或 Bot</span></div><div><Check size={16} /><span>可直接套用任何人的官方資料包</span></div><div><Check size={16} /><span>Chrome、Edge 桌面版效果最佳</span></div></div>
+        <div className="requirements"><div><Check size={16} /><span><b>基本分析</b>不需要 Token 或 Bot</span></div><div><Check size={16} /><span>可直接套用任何人的官方資料包</span></div><div><Check size={16} /><span>Chrome、Edge 桌面版效果最佳</span></div></div>
       </div>
     </section>
     <section className="feature-strip" aria-label="可用統計"><div><Users size={20} /><span><b>私訊排行</b>最常聯絡的人</span></div><div><Activity size={20} /><span><b>活躍趨勢</b>月份、星期與時段</span></div><div><Server size={20} /><span><b>社群排行</b>伺服器與頻道分布</span></div></section>
-    <footer>資料不會離開瀏覽器 · 支援 Discord 官方 JSON Data Package</footer>
+    <footer>訊息原文留在瀏覽器 · 頭像可由本機伺服器向 Discord 查詢</footer>
   </main>;
 }
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const conversationRequestRef = useRef(0);
+  const profileRequestedRef = useRef(new Set<string>());
   const [data, setData] = useState<ImportedData | null>(null);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -248,6 +256,7 @@ export default function Home() {
   const [exportSections, setExportSections] = useState<ExportSections>({ identity: true, summary: true, people: true, trend: true, voice: true });
   const [conversation, setConversation] = useState<ConversationState | null>(null);
   const [visibleMessages, setVisibleMessages] = useState(300);
+  const [participantProfiles, setParticipantProfiles] = useState<Record<string, ParticipantProfile>>({});
   const chooseFolder = () => inputRef.current?.click();
 
   async function handleFiles(files: FileList | null) {
@@ -256,6 +265,7 @@ export default function Home() {
     try {
       const imported = await importPackage(files, setProgress);
       data?.avatar?.close();
+      Object.values(participantProfiles).forEach((profile) => profile.avatar?.close()); profileRequestedRef.current.clear(); setParticipantProfiles({});
       setData(imported); setPreset('all'); setQuery(''); setVoiceSessions([]);
       if (imported.voiceSource) {
         setVoiceStatus('scanning'); setVoiceProgress(0);
@@ -335,6 +345,34 @@ export default function Home() {
     if (preset === 'custom') return `${customStart || '最早'} 至 ${customEnd || '現在'}`;
     return `${date.format(derived.earliest)} 至 ${date.format(derived.latest)}`;
   }, [derived, preset, customStart, customEnd]);
+
+  useEffect(() => {
+    if (!data || !derived) return;
+    const requestedIds = profileRequestedRef.current;
+    const ids = [...new Set(derived.people.filter((item) => showUnknownParticipants || !isUnknownParticipant(item.name)).map((item) => data.channels.find((channel) => channel.kind === 'DM' && channel.name === item.name && channel.recipientId)?.recipientId).filter((id): id is string => Boolean(id)))].slice(0, 20).filter((id) => !requestedIds.has(id));
+    if (!ids.length) return;
+    ids.forEach((id) => requestedIds.add(id));
+    const controller = new AbortController();
+    let settled = false;
+    void fetch('/api/discord-users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }), signal: controller.signal })
+      .then((response) => { if (!response.ok) throw new Error('Profile lookup failed'); return response.json() as Promise<{ profiles?: ParticipantProfile[] }>; })
+      .then(async ({ profiles = [] }) => {
+        const hydrated = await Promise.all(profiles.map(async (profile) => {
+          if (!profile.avatarUrl) return profile;
+          try { const avatar = await createImageBitmap(await (await fetch(profile.avatarUrl)).blob()); return { ...profile, avatar }; }
+          catch { return profile; }
+        }));
+        settled = true;
+        const resolvedIds = new Set(hydrated.map((profile) => profile.id));
+        ids.filter((id) => !resolvedIds.has(id)).forEach((id) => requestedIds.delete(id));
+        setParticipantProfiles((current) => ({ ...current, ...Object.fromEntries(hydrated.map((profile) => [profile.id, profile])) }));
+      })
+      .catch(() => ids.forEach((id) => requestedIds.delete(id)));
+    return () => {
+      controller.abort();
+      if (!settled) ids.forEach((id) => requestedIds.delete(id));
+    };
+  }, [data, derived, showUnknownParticipants]);
 
   async function openConversation(name: string) {
     if (!data || !derived) return;
@@ -450,7 +488,7 @@ export default function Home() {
       }
       const titleY = compact ? 165 : 196; ctx.fillStyle = C.text; font(compact ? 48 : 62, 800); ctx.fillText(exportPurpose === 'story' ? 'Discord 足跡' : 'Discord 使用報告', pad, titleY);
       ctx.fillStyle = C.muted; font(compact ? 18 : 21, 500); ctx.fillText(fitText(rangeText, width - pad * 2), pad, titleY + (compact ? 42 : 48));
-      rounded(pad, titleY + (compact ? 64 : 74), compact ? 166 : 186, compact ? 35 : 40, 20, 'rgba(88,101,242,.18)', 'rgba(88,101,242,.45)'); ctx.fillStyle = C.light; font(compact ? 13 : 15, 700); ctx.fillText('●  本機產生 · 零上傳', pad + 16, titleY + (compact ? 87 : 100));
+      rounded(pad, titleY + (compact ? 64 : 74), compact ? 166 : 186, compact ? 35 : 40, 20, 'rgba(88,101,242,.18)', 'rgba(88,101,242,.45)'); ctx.fillStyle = C.light; font(compact ? 13 : 15, 700); ctx.fillText('●  本機產生 · 原文不上傳', pad + 16, titleY + (compact ? 87 : 100));
       return titleY + (compact ? 123 : 142);
     };
     const drawStats = (x: number, y: number, w: number, cardH: number, columns: number) => {
@@ -462,7 +500,19 @@ export default function Home() {
     const drawPeople = (x: number, y: number, w: number, h: number, count: number) => {
       rounded(x, y, w, h, 24, C.panel, C.line); ctx.fillStyle = C.text; font(25, 750); ctx.fillText('最常聯絡', x + 28, y + 43); ctx.fillStyle = C.dim; font(14, 550); ctx.textAlign = 'right'; ctx.fillText('你送出的訊息', x + w - 28, y + 42); ctx.textAlign = 'left';
       const top = exportPeople.slice(0, count); const max = Math.max(1, ...top.map((item) => item.count)); const rowH = (h - 80) / Math.max(1, top.length); const avatarColors = ['#5865f2', '#23a559', '#eb459e', '#f0b232', '#3ba55c', '#9b84ee'];
-      top.forEach((item, index) => { const cy = y + 78 + index * rowH; ctx.fillStyle = avatarColors[index % avatarColors.length]; ctx.beginPath(); ctx.arc(x + 50, cy, 21, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; font(15, 800); ctx.textAlign = 'center'; ctx.fillText(Array.from(item.name)[0]?.toUpperCase() || '?', x + 50, cy + 5); ctx.textAlign = 'left'; ctx.fillStyle = C.text; font(16, 650); ctx.fillText(fitText(`${index + 1}. ${item.name}`, w * .53), x + 84, cy + 1); ctx.fillStyle = C.light; font(15, 750); ctx.textAlign = 'right'; ctx.fillText(`${number.format(item.count)} 則`, x + w - 28, cy + 1); ctx.textAlign = 'left'; rounded(x + 84, cy + 13, w - 112, 7, 4, '#3a3c43'); rounded(x + 84, cy + 13, (w - 112) * item.count / max, 7, 4, C.blurple); });
+      top.forEach((item, index) => {
+        const cy = y + 78 + index * rowH;
+        const recipientId = data.channels.find((channel) => channel.kind === 'DM' && channel.name === item.name && channel.recipientId)?.recipientId;
+        const avatar = recipientId ? participantProfiles[recipientId]?.avatar : undefined;
+        ctx.save(); ctx.beginPath(); ctx.arc(x + 50, cy, 21, 0, Math.PI * 2); ctx.clip();
+        if (avatar) {
+          const size = 42; const scale = Math.max(size / avatar.width, size / avatar.height); const dw = avatar.width * scale; const dh = avatar.height * scale;
+          ctx.drawImage(avatar, x + 50 - dw / 2, cy - dh / 2, dw, dh);
+        } else {
+          ctx.fillStyle = avatarColors[index % avatarColors.length]; ctx.fillRect(x + 29, cy - 21, 42, 42); ctx.fillStyle = '#fff'; font(15, 800); ctx.textAlign = 'center'; ctx.fillText(Array.from(item.name)[0]?.toUpperCase() || '?', x + 50, cy + 5);
+        }
+        ctx.restore(); ctx.strokeStyle = C.panel2; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x + 50, cy, 21, 0, Math.PI * 2); ctx.stroke(); ctx.textAlign = 'left'; ctx.fillStyle = C.text; font(16, 650); ctx.fillText(fitText(`${index + 1}. ${item.name}`, w * .53), x + 84, cy + 1); ctx.fillStyle = C.light; font(15, 750); ctx.textAlign = 'right'; ctx.fillText(`${number.format(item.count)} 則`, x + w - 28, cy + 1); ctx.textAlign = 'left'; rounded(x + 84, cy + 13, w - 112, 7, 4, '#3a3c43'); rounded(x + 84, cy + 13, (w - 112) * item.count / max, 7, 4, C.blurple);
+      });
     };
     const drawTrend = (x: number, y: number, w: number, h: number) => {
       rounded(x, y, w, h, 24, C.panel, C.line); ctx.fillStyle = C.text; font(24, 750); ctx.fillText('每月訊息趨勢', x + 28, y + 43); const items = derived.trend.slice(-12); const max = Math.max(1, ...items.map((item) => item.count)); const chartTop = y + 76; const chartH = h - 116; const gap = 9; const barW = (w - 56 - gap * Math.max(0, items.length - 1)) / Math.max(1, items.length);
@@ -534,7 +584,11 @@ export default function Home() {
   const maxHour = Math.max(1, ...(derived?.hours || []));
   const rankContent = (row: { name: string; count: number }, index: number) => {
     const recipientId = rankingTab === 'people' ? data.channels.find((channel) => channel.kind === 'DM' && channel.name === row.name && channel.recipientId)?.recipientId : undefined;
-    return <><span className={`rank-number ${index < 3 ? 'top' : ''}`}>{index + 1}</span><div className="rank-main"><div className="rank-label"><div className="rank-person"><span>{row.name}</span>{recipientId && <small>ID: {recipientId}</small>}</div><b>{number.format(row.count)} 則</b></div><div className="rank-track"><span style={{ width: `${Math.max(3, (row.count / maxRank) * 100)}%` }} /></div></div>{rankingTab === 'people' && <MessageCircle className="rank-open-icon" size={16} />}</>;
+    const profile = recipientId ? participantProfiles[recipientId] : undefined;
+    const rankMarker = rankingTab === 'people'
+      ? <span className="rank-avatar">{profile?.avatarUrl ? <AvatarImage src={profile.avatarUrl} alt={`${row.name} 的 Discord 頭像`} /> : <span>{Array.from(row.name)[0]?.toUpperCase() || '?'}</span>}<i>{index + 1}</i></span>
+      : <span className={`rank-number ${index < 3 ? 'top' : ''}`}>{index + 1}</span>;
+    return <>{rankMarker}<div className="rank-main"><div className="rank-label"><div className="rank-person"><span>{row.name}</span>{recipientId && <small>ID: {recipientId}</small>}</div><b>{number.format(row.count)} 則</b></div><div className="rank-track"><span style={{ width: `${Math.max(3, (row.count / maxRank) * 100)}%` }} /></div></div>{rankingTab === 'people' && <MessageCircle className="rank-open-icon" size={16} />}</>;
   };
 
   return <main className="dashboard">
@@ -599,7 +653,7 @@ export default function Home() {
           </div>
           <aside className={`export-preview ${exportPurpose}`}>
             {exportFormat === 'png'
-              ? <><div className="preview-label"><span>即時預覽</span><small>與匯出圖片完全相同</small></div><div className="preview-stage"><canvas key={`${exportPurpose}-${Object.values(exportSections).join('-')}-${rangeText}-${voiceStatus}-${showUnknownParticipants}`} ref={(canvas) => { if (canvas) renderPngCanvas(canvas); }} aria-label="PNG 匯出即時預覽" /></div></>
+              ? <><div className="preview-label"><span>即時預覽</span><small>與匯出圖片完全相同</small></div><div className="preview-stage"><canvas key={`${exportPurpose}-${Object.values(exportSections).join('-')}-${rangeText}-${voiceStatus}-${showUnknownParticipants}-${Object.values(participantProfiles).filter((profile) => profile.avatar).length}`} ref={(canvas) => { if (canvas) renderPngCanvas(canvas); }} aria-label="PNG 匯出即時預覽" /></div></>
               : <div className="preview-unavailable"><FileCode2 size={28} /><b>{exportFormat === 'excel' ? 'Excel 資料表' : 'HTML 網頁報告'}</b><p>{exportFormat === 'excel' ? '下載後可在 Excel 開啟並繼續編輯。' : '下載後可直接用瀏覽器開啟完整報告。'}</p></div>}
           </aside>
         </div>
@@ -609,7 +663,7 @@ export default function Home() {
     <Sheet open={Boolean(conversation)} onOpenChange={(open) => { if (!open) { conversationRequestRef.current += 1; setConversation(null); } }}>
       <SheetContent className="conversation-sheet">
         <SheetHeader className="conversation-header">
-          <div className="conversation-avatar">{Array.from(conversation?.name || '?')[0]?.toUpperCase()}</div>
+          <div className="conversation-avatar">{conversation?.recipientId && participantProfiles[conversation.recipientId]?.avatarUrl ? <AvatarImage src={participantProfiles[conversation.recipientId].avatarUrl!} alt={`${conversation.name} 的 Discord 頭像`} /> : Array.from(conversation?.name || '?')[0]?.toUpperCase()}</div>
           <div><SheetTitle>{conversation?.name || '私訊紀錄'}</SheetTitle>{conversation?.recipientId && <code className="conversation-id">ID: {conversation.recipientId}</code>}<SheetDescription>{rangeText} · 只顯示你送出的訊息</SheetDescription></div>
         </SheetHeader>
         <div className="conversation-notice"><LockKeyhole size={14} /> 訊息從本機 Data Package 讀取，不會上傳。</div>
