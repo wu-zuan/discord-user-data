@@ -1,10 +1,12 @@
-# Discord Lens
+# Social Lens
 
-Discord Lens 是一個本機優先的 Discord Data Package 分析工具。選擇 Discord 官方匯出的 `package` 資料夾後，應用程式會直接在瀏覽器中解析訊息與活動資料，整理成可互動的統計儀表板，並可匯出 Excel、HTML 或社群分享圖片。
+Social Lens 是一個本機優先的 Discord 與 Instagram 官方資料包分析工具。Discord Lens 提供訊息、語音與社群分享報告；Instagram Lens 提供雙向私訊、關係網路與活躍節奏分析。
 
 > 訊息與 Activity 內容只在目前瀏覽器分頁及本機記憶體中處理，不會上傳到專案伺服器。若設定選用的 Bot Token，本機伺服器只會把 DM 對象的 User ID 傳給 Discord 官方 API，以取得公開帳號名稱與頭像。重新整理頁面後，已匯入的資料會清除。
 
 ## 功能
+
+### Discord Lens
 
 - 統計自己送出的訊息數、活躍日、附件、連結與文字字元數
 - 查看最常聯絡的私訊對象、最活躍的伺服器與頻道
@@ -21,6 +23,19 @@ Discord Lens 是一個本機優先的 Discord Data Package 分析工具。選擇
 - PNG 提供限時動態、方形分享與橫式報告三種比例
 - PNG 設定視窗提供與下載結果相同的即時 Canvas 預覽
 - 深色 Discord 風格介面
+
+### Instagram Lens
+
+- 讀取 Meta 匯出的 HTML 資料包，不需要 Instagram Token
+- 支援一般收件匣、訊息邀請與隱藏對話
+- 自動推斷帳號本人的顯示名稱，也可由「我是」選單修正
+- 統計全部訊息、本人送出、對方傳入、活躍日與媒體附件
+- 查看最常聊天的對象、每月趨勢與一天中的活躍時段
+- 解析追蹤者、追蹤中與互相關注數量
+- 支援今年、去年、近 90 天與自訂日期範圍
+- 點擊對象查看目前篩選範圍內的雙向聊天紀錄
+- 將目前排行匯出為 UTF-8 CSV
+- Instagram 深色漸層介面與響應式版面
 
 ## 重要限制
 
@@ -76,6 +91,23 @@ package/
 
 不同時間匯出的 Data Package 可能具有不同檔名或欄位。缺少選用資料時，相關功能會顯示無法分析，而不會阻止基本訊息統計。
 
+Instagram Lens 至少需要：
+
+```text
+instagram-export/
+├─ your_instagram_activity/
+│  └─ messages/
+│     ├─ inbox/<conversation>/message_1.html
+│     ├─ message_requests/<conversation>/message_1.html  # 選用
+│     └─ hidden_threads/<conversation>/message_1.html    # 選用
+└─ connections/
+   └─ followers_and_following/
+      ├─ followers_1.html                               # 選用
+      └─ following.html                                 # 選用
+```
+
+目前針對 Meta 的 HTML 匯出格式解析。若下載資料時選擇 JSON，請重新匯出為 HTML。
+
 ## 本機使用
 
 ### 系統需求
@@ -113,7 +145,7 @@ DISCORD_BOT_TOKEN=你的_Bot_Token
 http://localhost:3000
 ```
 
-按下「選擇資料夾」，選取解壓縮後的 Discord `package` 目錄即可開始分析。
+開啟 `/` 使用 Discord Lens；開啟 `/instagram` 使用 Instagram Lens。按下「選擇資料夾」後，選取對應平台解壓縮後的根目錄。
 
 ### 建置正式版本
 
@@ -121,6 +153,27 @@ http://localhost:3000
 npm run build
 npm run start
 ```
+
+`npm run build` 會建立 Cloudflare Pages 可使用的靜態輸出 `dist/client`；`npm run start` 會以 Pages 本機環境預覽。
+
+## 部署到 Cloudflare Pages
+
+建議將 Repository 連接到 Cloudflare Pages，設定：
+
+| 設定 | 值 |
+| --- | --- |
+| Production branch | `master` |
+| Build command | `npm run build` |
+| Build output directory | `dist/client` |
+| Node.js | `22.13` 或更新版本 |
+
+專案根目錄的 `functions/api/discord-users.ts` 是 Pages Function，讓部署後的 Discord Lens 仍能安全地查詢頭像。請在 Cloudflare Pages 的 Settings → Variables and Secrets 加入加密 Secret：
+
+```text
+DISCORD_BOT_TOKEN
+```
+
+不要把 Token 寫入 Cloudflare 的一般明文變數，也不要提交 `.env`。Instagram Lens 完全不需要伺服器密鑰。含 Functions 的 Pages 專案應透過 Git 整合或 Wrangler 部署，不要使用 Dashboard Direct Upload。
 
 ### 程式檢查
 
@@ -137,6 +190,14 @@ npm run lint
 5. 點擊私訊對象，可查看目前日期範圍內最近 300 則本人送出的訊息。
 6. 需要更早紀錄時，按下「載入更早的 300 則」。
 7. 按下「建立分享報告」設定格式、用途與要公開的統計內容。
+
+Instagram 使用方式：
+
+1. 開啟 `/instagram`，選擇解壓縮後的 Instagram HTML 資料夾。
+2. 確認「我是」選單是否正確辨識你的顯示名稱。
+3. 選擇日期範圍以及全部／本人送出／對方傳入。
+4. 點擊私訊排行即可查看雙向聊天紀錄。
+5. 按下「匯出 CSV」下載目前篩選後的排行摘要。
 
 ## 匯出格式
 
@@ -182,6 +243,7 @@ PNG 使用瀏覽器 Canvas 在本機產生，提供：
 - 不應把 Discord User Token、Bot Token 或其他密鑰提交到 Repository
 - `.gitignore` 已排除 `.env*`，只保留不含密鑰的 `.env.example`
 - 不會儲存或上傳訊息原文
+- Instagram HTML、追蹤名單與聊天內容只在使用者瀏覽器內解析
 - 啟用頭像功能時，只把最多前 20 名 DM 對象的 User ID 傳給 Discord 官方 API
 - Bot Token 只由 `app/api/discord-users/route.ts` 在本機伺服器端讀取，不會傳給前端
 - 聊天內容只在使用者點擊對象時，從對應的本機檔案讀取
@@ -192,6 +254,7 @@ PNG 使用瀏覽器 Canvas 在本機產生，提供：
 
 - React 19
 - Vinext / Vite
+- Cloudflare Pages 靜態輸出與 Pages Functions
 - TypeScript
 - Shadcn 與 Base UI 互動元件
 - Lucide 圖示
@@ -202,7 +265,9 @@ PNG 使用瀏覽器 Canvas 在本機產生，提供：
 
 ```text
 app/page.tsx       # 資料解析、統計、互動與匯出
+app/instagram/page.tsx # Instagram HTML 解析、統計與聊天檢視
 app/api/discord-users/route.ts # 使用 Bot Token 查詢公開帳號資料與頭像
+functions/api/discord-users.ts # Cloudflare Pages 上的 Discord 頭像 Function
 app/globals.css    # Discord 風格與響應式版面
 components/ui/     # 介面元件
 ```

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   Activity, ArrowDownToLine, CalendarDays, Check, ChevronDown, Clock3,
   FileCode2, FileJson, FileSpreadsheet, FolderOpen, Hash, Headphones, Image,
@@ -212,7 +213,7 @@ function DiscordMark({ size = 21 }: { size?: number }) {
 
 function EmptyState({ onChoose }: { onChoose: () => void }) {
   return <main className="import-page">
-    <nav className="brand-bar"><div className="brand"><span className="brand-mark"><DiscordMark /></span><span>Discord Lens</span></div><div className="local-pill"><LockKeyhole size={14} /> 只在你的裝置處理</div></nav>
+    <nav className="brand-bar"><div className="brand"><span className="brand-mark"><DiscordMark /></span><span>Discord Lens</span></div><div className="header-actions"><Link className="platform-link instagram" href="/instagram"><span className="instagram-dot" /> Instagram Lens</Link><div className="local-pill"><LockKeyhole size={14} /> 只在你的裝置處理</div></div></nav>
     <section className="import-shell">
       <div className="intro-copy">
         <div className="eyebrow"><Sparkles size={15} /> Discord Data Package 分析器</div>
@@ -593,7 +594,7 @@ export default function Home() {
 
   return <main className="dashboard">
     {input}
-    <header className="dashboard-header"><div className="brand"><span className="brand-mark"><DiscordMark /></span><span>Discord Lens</span></div><div className="header-actions"><span className="privacy-note"><LockKeyhole size={14} /> 本機分析</span><button className="ghost-button" onClick={chooseFolder}><FolderOpen size={16} /> 更換資料</button><button className="export-button" onClick={() => setExportOpen(true)}><Share2 size={16} /> 建立分享報告</button></div></header>
+    <header className="dashboard-header"><div className="brand"><span className="brand-mark"><DiscordMark /></span><span>Discord Lens</span></div><div className="header-actions"><Link className="platform-link instagram" href="/instagram"><span className="instagram-dot" /> Instagram Lens</Link><span className="privacy-note"><LockKeyhole size={14} /> 本機分析</span><button className="ghost-button" onClick={chooseFolder}><FolderOpen size={16} /> 更換資料</button><button className="export-button" onClick={() => setExportOpen(true)}><Share2 size={16} /> 建立分享報告</button></div></header>
     <div className="dashboard-shell">
       <section className="welcome-row"><div><p className="eyebrow">{data.packageName} · {data.userName}</p><h1>你的 Discord 訊息總覽</h1><p>統計只包含你送出的訊息，所有資料都在瀏覽器內處理。</p></div><div className="date-chip"><CalendarDays size={18} /><span>{derived ? `${date.format(derived.earliest)} — ${date.format(derived.latest)}` : '—'}</span></div></section>
       <section className="filter-bar" aria-label="篩選條件">
